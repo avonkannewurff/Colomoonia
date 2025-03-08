@@ -1,6 +1,6 @@
 name=Moon
 author=VK  
 description=
-bundleID=
+bundleID=com.VK.moon
 version=0.0.1
 buildNumber=1
