@@ -17,6 +17,7 @@ assets.preloadImagetable("images/moon.png")
 assets.preloadImagetable("images/selector")
 assets.preloadImages({ "images/cursor_32-32", "images/cursor_64-64" })
 assets.preloadImages({ "images/house", "images/dish", "images/small_tower", "images/tank" })
+assets.preloadImages({ "images/laser_16-16" })
 
 -- Setup
 pd.display.setRefreshRate(30)
@@ -27,6 +28,12 @@ gfx.setFont(sasserFont)
 --Game State
 local score = 0
 local mode = "building"
+
+-- Tags
+TAGS = {
+    building = 1,
+    laser = 2
+}
 
 --Background
 local starsImage = assets.getImage("images/stars")
@@ -78,6 +85,10 @@ for i = 0, #buildingImages do
     buildingSprites[i] = gfx.sprite.new(buildingImages[i])
 end
 local nextBuilding
+
+-- Lasers
+local laserSpeed = 2
+local lasers = {}
 
 -- Track overall rotations
 local overallRotations = 0
@@ -134,6 +145,9 @@ end
 function cycleBuilding()
     currentBuildingFrame = (currentBuildingFrame + math.random(2)) % buildingFrameCount
     nextBuilding = buildingSprites[currentBuildingFrame]:copy()
+    nextBuilding:setGroups({ TAGS.building })
+    nextBuilding:setTag(TAGS.building)
+    nextBuilding:setCollidesWithGroups({ TAGS.building, TAGS.laser })
     local buildingx, buildingy, buildingWidth, buildingHeight = nextBuilding:getBounds()
     if buildingWidth == 32 then
         nextBuilding:moveTo(16, 16)
@@ -164,11 +178,27 @@ function placeBuilding()
         end
         return false
     end
-
     table.insert(buildings,
         { sprite = nextBuilding, angle = angle, distance = distance, initialRotation = initialRotation })
     score += 1
     return true
+end
+
+function fireLaser()
+    local laserImage = assets.getImage("images/laser_16-16")
+    local laserSprite = gfx.sprite.new(laserImage)
+    laserSprite:setCollideRect(0, 0, 16, 16)
+    laserSprite:setGroups({ TAGS.laser })
+    laserSprite:setTag(TAGS.laser)
+    laserSprite:setCollidesWithGroups({ TAGS.building })
+    laserSprite:add()
+
+    local startX = math.random(0, 400)
+    local startY = 0
+    local laserTargetX, laserTargetY = laserCursorSprite:getPosition()
+    laserSprite:moveTo(startX, startY)
+    laserSprite:setVisible(true)
+    table.insert(lasers, { sprite = laserSprite, speed = laserSpeed, targetX = laserTargetX, targetY = laserTargetY })
 end
 
 -- Handle A button press to perform action
@@ -179,7 +209,7 @@ function playdate.AButtonDown()
             cycleBuilding()
         end
     elseif mode == "laser" then
-        print("pew pew")
+        fireLaser()
     end
 end
 
@@ -228,6 +258,44 @@ function updateMoon()
     end
 end
 
+function updateLasers()
+    for _, laser in ipairs(lasers) do
+        local x, y = laser.sprite:getPosition()
+        local dx = laser.targetX - x
+        local dy = laser.targetY - y
+        local distance = math.sqrt(dx * dx + dy * dy)
+
+        if distance < laser.speed then
+            laser.sprite:remove()
+            -- table.remove(lasers, _)
+            laser.delete = true
+        else
+            local angle = math.atan(dy, dx)
+            x = x + laser.speed * math.cos(angle)
+            y = y + laser.speed * math.sin(angle)
+
+            local _actualX, _actualY, collisions, length = laser.sprite:moveWithCollisions(x, y)
+            if length > 0 then -- Check for collisions
+                for _, collision in ipairs(collisions) do
+                    local collisionTag = collision.other:getTag()
+                    if collisionTag == TAGS.building then
+                        laser.sprite:remove()
+                        collision.other:remove()
+                        laser.delete = true
+                        score -= 1
+                    end
+                end
+            end
+        end
+    end
+
+    for _, laser in ipairs(lasers) do
+        if laser.delete then
+            table.remove(lasers, _)
+        end
+    end
+end
+
 -- playdate.update function is required in every project!
 function playdate.update()
     -- Clear screen
@@ -236,6 +304,7 @@ function playdate.update()
 
     updateCursor()
     updateMoon()
+    updateLasers()
 
     gfx.drawTextAligned("Score: " .. score, 390, 5, kTextAlignment.right)
 end
