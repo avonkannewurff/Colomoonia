@@ -3,16 +3,19 @@ import "CoreLibs/graphics"
 import "CoreLibs/ui"
 import "CoreLibs/animation"
 import "libraries/Assets"
+import "libraries/Utilities"
 
 -- Localizing commonly used globals
 local pd <const> = playdate
 local gfx <const> = playdate.graphics
 local assets <const> = Assets
+local utilities <const> = Utilities
 
 -- Preload Images
 assets.preloadImages({ "images/stars" })
-assets.preloadImagetable("images/moon-table-512-512.png")
-assets.preloadImages({ "images/cursor" })
+assets.preloadImagetable("images/moon.png")
+assets.preloadImagetable("images/selector")
+assets.preloadImages({ "images/cursor_32-32", "images/cursor_64-64" })
 assets.preloadImages({ "images/house", "images/dish", "images/small_tower", "images/tank" })
 
 -- Setup
@@ -23,6 +26,7 @@ gfx.setFont(sasserFont)
 
 --Game State
 local score = 0
+local mode = "building"
 
 --Background
 local starsImage = assets.getImage("images/stars")
@@ -44,11 +48,18 @@ moonSprite:add()
 
 -- Cursor
 local cursorSpeed = 4
-local cursorImage = assets.getImage("images/cursor")
-local cursorSprite = gfx.sprite.new(cursorImage)
-cursorSprite:moveTo(200, 120)
-cursorSprite:setZIndex(100)
-cursorSprite:add()
+local cursorImage = assets.getImage("images/cursor_32-32")
+local buildingCursorSprite = gfx.sprite.new(cursorImage)
+local selectorImagetable = assets.getImagetable("images/selector")
+local laserCursorSprite = utilities.animatedSprite(200, 120, selectorImagetable, 50, true)
+buildingCursorSprite:moveTo(200, 120)
+buildingCursorSprite:setZIndex(100)
+buildingCursorSprite:add()
+
+laserCursorSprite:setIgnoresDrawOffset(true)
+laserCursorSprite:setVisible(false)
+laserCursorSprite:setZIndex(100)
+laserCursorSprite:add()
 
 -- Buildings
 local buildings = {}
@@ -66,14 +77,30 @@ local buildingSprites = {}
 for i = 0, #buildingImages do
     buildingSprites[i] = gfx.sprite.new(buildingImages[i])
 end
+local nextBuilding
 
 -- Track overall rotations
 local overallRotations = 0
 local lastCrankPosition = pd.getCrankPosition()
 
--- Update function for cursor movement
 function updateCursor()
-    local x, y = cursorSprite:getPosition()
+    local x, y = buildingCursorSprite:getPosition()
+    if mode == "building" then
+        local buildingx, buildingy, buildingWidth, buildingHeight = nextBuilding:getBounds()
+        if buildingWidth == 32 then
+            cursorImage = assets.getImage("images/cursor_32-32")
+        elseif buildingWidth == 64 then
+            cursorImage = assets.getImage("images/cursor_64-64")
+        end
+        buildingCursorSprite:setImage(cursorImage)
+        buildingCursorSprite:setVisible(true)
+        laserCursorSprite:setVisible(false)
+    elseif mode == "laser" then
+        laserCursorSprite:moveTo(x, y)
+        buildingCursorSprite:setVisible(false)
+        laserCursorSprite:setVisible(true)
+    end
+
     if pd.buttonIsPressed(pd.kButtonUp) then
         y -= cursorSpeed
     elseif pd.buttonIsPressed(pd.kButtonDown) then
@@ -100,51 +127,69 @@ function updateCursor()
         y = 224
     end
 
-    cursorSprite:moveTo(x, y)
+    buildingCursorSprite:moveTo(x, y)
+    laserCursorSprite:moveTo(x, y)
 end
 
--- Function to cycle through building sprites
 function cycleBuilding()
-    currentBuildingFrame = (currentBuildingFrame + math.random(10)) % buildingFrameCount
+    currentBuildingFrame = (currentBuildingFrame + math.random(2)) % buildingFrameCount
+    nextBuilding = buildingSprites[currentBuildingFrame]:copy()
+    local buildingx, buildingy, buildingWidth, buildingHeight = nextBuilding:getBounds()
+    if buildingWidth == 32 then
+        nextBuilding:moveTo(16, 16)
+    elseif buildingWidth == 64 then
+        nextBuilding:moveTo(32, 32)
+    end
+    nextBuilding:add()
 end
 
--- Function to place a building
 function placeBuilding()
-    local x, y = cursorSprite:getPosition()
+    local x, y = buildingCursorSprite:getPosition()
     local dx = x - moonCenterX
     local dy = y - moonCenterY
     local angle = math.atan(dy, dx)
     local distance = math.sqrt(dx * dx + dy * dy)
     local initialRotation = overallRotations * (2 * math.pi / crankRotationsPerFullTraversal)
 
-    local buildingSprite = buildingSprites[currentBuildingFrame]:copy()
-    local buildingx, buildingy, buildingWidth, buildingHeight = buildingSprite:getBounds()
-    buildingSprite:setCollideRect(0, 0, buildingWidth, buildingHeight)
-    buildingSprite:moveTo(x, y)
-    buildingSprite:add()
-    local overlap = buildingSprite:overlappingSprites()
+    local buildingx, buildingy, buildingWidth, buildingHeight = nextBuilding:getBounds()
+    nextBuilding:setCollideRect(0, 0, buildingWidth, buildingHeight)
+    nextBuilding:moveTo(x, y)
+    nextBuilding:add()
+    local overlap = nextBuilding:overlappingSprites()
     if #overlap > 0 then
-        buildingSprite:remove()
+        if buildingWidth == 32 then
+            nextBuilding:moveTo(16, 16)
+        elseif buildingWidth == 64 then
+            nextBuilding:moveTo(32, 32)
+        end
         return false
     end
 
     table.insert(buildings,
-        { sprite = buildingSprite, angle = angle, distance = distance, initialRotation = initialRotation })
+        { sprite = nextBuilding, angle = angle, distance = distance, initialRotation = initialRotation })
     score += 1
     return true
 end
 
--- Handle A button press to place building
+-- Handle A button press to perform action
 function playdate.AButtonDown()
-    -- Only cycle to next building once we've placed the current
-    if (placeBuilding()) then
-        cycleBuilding()
+    if mode == "building" then
+        -- Only cycle to next building once we've placed the current
+        if (placeBuilding()) then
+            cycleBuilding()
+        end
+    elseif mode == "laser" then
+        print("pew pew")
     end
 end
 
 -- Handle B button press to place building
 function playdate.BButtonDown()
-    placeBuilding()
+    if mode == "building" then
+        mode = "laser"
+    else
+        mode = "building"
+    end
 end
 
 function updateMoon()
@@ -187,10 +232,13 @@ end
 function playdate.update()
     -- Clear screen
     gfx.sprite.update()
-    pd.drawFPS(0, 0)
+    pd.drawFPS(385, 225)
 
     updateCursor()
     updateMoon()
 
     gfx.drawTextAligned("Score: " .. score, 390, 5, kTextAlignment.right)
 end
+
+--Init
+cycleBuilding()
