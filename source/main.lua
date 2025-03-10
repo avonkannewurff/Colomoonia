@@ -33,6 +33,14 @@ pd.display.setRefreshRate(30)
 local sasserFont = gfx.font.new("fonts/Sasser Slab/Sasser-Slab")
 gfx.setFont(sasserFont)
 
+--Audio
+local backgroundMusic = pd.sound.fileplayer.new("audio/space_ambient")  --https://freesound.org/people/cliploop/sounds/750961/
+local laserEffect = pd.sound.sampleplayer.new("audio/laser")            --https://freesound.org/people/Gemmellness/sounds/181356/
+local crumbleEffect = pd.sound.sampleplayer.new("audio/crumble")        --https://pixabay.com/sound-effects/rock-smash-6304/
+local monsterSpawn = pd.sound.sampleplayer.new("audio/monster_spawn")   -- https://freesound.org/people/Xfrtrex/sounds/765631/
+local monsterDeath = pd.sound.sampleplayer.new("audio/monster_die")     -- https://freesound.org/people/Xfrtrex/sounds/765631/
+local buildingPlace = pd.sound.sampleplayer.new("audio/building_place") -- https://freesound.org/people/AudioPapkin/sounds/755054/
+
 --Game State
 local gameState = "intro" -- Initialize game state
 local score = 0
@@ -94,7 +102,7 @@ laserCursorSprite:add()
 
 -- Buildings
 buildings = {}
-local buildingHealth = 20
+local buildingHealth = 10
 -- Building images
 local buildingFrameCount = 4
 local currentBuildingFrame = 1
@@ -316,6 +324,7 @@ function placeBuilding()
         building.sprite:remove()
         return false
     end
+    buildingPlace:play(1)
     table.insert(buildings, building)
     score += 1
     highestScore += 1
@@ -323,6 +332,7 @@ function placeBuilding()
 end
 
 function fireLaser()
+    laserEffect:play(1)
     local laserImage = assets.getImage("images/laser_16-16")
     local laserSprite = gfx.sprite.new(laserImage)
     laserSprite:setCollideRect(0, 0, 16, 16)
@@ -357,6 +367,7 @@ function spawnEnemy()
     local y = moonCenterY + distance * math.sin(angle)
     local initialRotation = overallRotations * (2 * math.pi / crankRotationsPerFullTraversal)
 
+    monsterSpawn:play(1)
     local enemy = Enemy:new(x, y, initialRotation)
     table.insert(enemies, enemy)
 end
@@ -494,6 +505,7 @@ function updateLasers()
                         local foundEnemy = nil
                         for _, e in ipairs(enemies) do
                             if e.sprite == enemy or e.attackSprite == enemy then
+                                monsterDeath:play(1)
                                 foundEnemy = e
                                 foundEnemy.attackSprite:remove()
                                 foundEnemy.sprite:remove()
@@ -603,6 +615,7 @@ function attackBuilding(enemy, building)
         end
 
         enemy:stopAttack()
+        crumbleEffect:play(1)
         foundBuilding.sprite:remove()
         -- Remove building from the buildings table
         for i = #buildings, 1, -1 do
@@ -690,4 +703,5 @@ end
 --Init
 cycleBuildingSprite()
 pd.resetElapsedTime()
+backgroundMusic:play(0)
 -- spawnEnemy()
