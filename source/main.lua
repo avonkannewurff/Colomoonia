@@ -2,6 +2,7 @@
 import "CoreLibs/graphics"
 import "CoreLibs/ui"
 import "CoreLibs/animation"
+import "CoreLibs/animator"
 import "libraries/Assets"
 import "libraries/Utilities"
 
@@ -18,6 +19,7 @@ assets.preloadImagetable("images/selector")
 assets.preloadImages({ "images/cursor_32-32", "images/cursor_64-64" })
 assets.preloadImages({ "images/house", "images/dish", "images/small_tower", "images/tank" })
 assets.preloadImages({ "images/laser_16-16" })
+assets.preloadImages({ "images/enemy_24-24" })
 
 -- Setup
 pd.display.setRefreshRate(30)
@@ -73,8 +75,7 @@ laserCursorSprite:add()
 
 -- Buildings
 local buildings = {}
-local targetBuildings = 20
-
+local buildingHealth = 50
 -- Building images
 local buildingFrameCount = 4
 local currentBuildingFrame = 1
@@ -91,7 +92,7 @@ end
 local nextBuilding
 
 -- Lasers
-local laserSpeed = 2
+local laserSpeed = 3
 local maxLasers = 10
 local lasers = {}
 
@@ -102,11 +103,8 @@ local buildingsScale = 0.01
 local enemySpawnTimer = 0
 local enemies = {}
 
-local enemyImage = gfx.image.new(16, 16) -- Create a simple enemy image
-gfx.pushContext(enemyImage)
-gfx.setColor(gfx.kColorBlack)
-gfx.fillCircleAtPoint(8, 8, 8)
-gfx.popContext()
+local enemyImage = assets.getImage("images/enemy_24-24")
+
 
 
 -- Track overall rotations
@@ -164,6 +162,7 @@ end
 function cycleBuilding()
     currentBuildingFrame = (currentBuildingFrame + math.random(2)) % buildingFrameCount
     nextBuilding = buildingSprites[currentBuildingFrame]:copy()
+    nextBuilding:setZIndex(50)
     nextBuilding:setGroups({ TAGS.building })
     nextBuilding:setTag(TAGS.building)
     nextBuilding:setCollidesWithGroups({ TAGS.building, TAGS.laser })
@@ -203,7 +202,14 @@ function placeBuilding()
         return false
     end
     table.insert(buildings,
-        { sprite = nextBuilding, angle = angle, distance = distance, initialRotation = initialRotation, health = 100 })
+        {
+            sprite = nextBuilding,
+            angle = angle,
+            distance = distance,
+            initialRotation = initialRotation,
+            health =
+                buildingHealth
+        })
     score += 1
     return true
 end
@@ -233,13 +239,14 @@ function calculateEnemySpawnRate()
     return baseSpawnRate + buildingsScale * #buildings
 end
 
-local function createEnemy()
+function createEnemy()
     local enemySprite = gfx.sprite.new(enemyImage)
-    enemySprite:setCollideRect(0, 0, 16, 16)
-    enemySprite:setZIndex(50)
+    enemySprite:setCollideRect(0, 0, enemySprite:getSize())
+    enemySprite:setZIndex(10)
     enemySprite:setGroups({ TAGS.enemy })
     enemySprite:setTag(TAGS.enemy)
-    enemySprite:setCollidesWithGroups({ TAGS.laser, TAGS.building, TAGS.enemy })
+    -- enemySprite.collisionResponse = function(self, other) return gfx.sprite.kCollisionTypeBounce end
+    enemySprite:setCollidesWithGroups({ TAGS.laser, TAGS.building })
     enemySprite:add()
     return enemySprite
 end
@@ -379,13 +386,13 @@ function updateLasers()
                         enemiesKilled += 1
                         local enemy = collision.other
                         laser.sprite:remove()
-                        enemy:remove()
                         for i = #enemies, 1, -1 do
-                            if enemies[i] == enemy then
+                            if enemies[i].sprite == enemy then
                                 table.remove(enemies, i)
                                 break
                             end
                         end
+                        enemy:remove()
                         laser.delete = true
                     end
                 end
@@ -408,34 +415,59 @@ function updateEnemies()
             enemy.target = findNearestBuilding(enemy)
         end
 
-        if enemy.target and not isMoonRotating then
+        if enemy.target and not isMoonRotating and not enemy.bouncing then
             local targetx, targety = enemy.target.sprite:getPosition()
             local enemyX, enemyY = enemy.sprite:getPosition()
             local dx = targetx - enemyX
             local dy = targety - enemyY
             local distance = math.sqrt(dx * dx + dy * dy)
-            enemy.distance = distance
 
             local angle = math.atan(dy, dx)
-            local x = enemyX + enemySpeed * math.cos(angle)
-            local y = enemyY + enemySpeed * math.sin(angle)
-            local _actualX, _actualY, collisions, length = enemy.sprite:moveWithCollisions(x, y)
+            local newX = enemyX + enemySpeed * math.cos(angle)
+            local newY = enemyY + enemySpeed * math.sin(angle)
+            local actualX, actualY, collisions, length = enemy.sprite:moveWithCollisions(newX, newY)
 
             -- Update enemy's angle and distance
-            local newAngle, newDistance, newInitialRotation = getAngleDistRot(_actualX, _actualY)
+            local newAngle, newDistance, newInitialRotation = getAngleDistRot(actualX, actualY)
             enemy.angle = newAngle
             enemy.distance = newDistance
             enemy.initialRotation = newInitialRotation
 
-            enemy.moved = true
             if length > 0 then -- Check for collisions
                 for _, collision in ipairs(collisions) do
                     local collidedBuilding = collision.other
                     local collisionTag = collidedBuilding:getTag()
                     if collisionTag == TAGS.building then
                         attackBuilding(enemy, collidedBuilding)
+
+                        -- Bounce off the building
+                        local bounceAngle     = math.pi + angle -- Reverse the angle
+                        local bounceX         = actualX + enemy.speed * 2 * math.cos(bounceAngle)
+                        local bounceY         = actualY + enemy.speed * 2 *
+                            math.sin(bounceAngle)
+
+                        -- Create bounce animation
+                        local startX, startY  = actualX, actualY
+                        local endX, endY      = bounceX, bounceY
+                        local duration        = { 250, 250 } -- milliseconds
+
+                        local parts           = {
+                            playdate.geometry.lineSegment.new(startX, startY, endX, endY),
+                            playdate.geometry.lineSegment.new(endX, endY, startX, startY)
+                        }
+                        local lineIn          = playdate.geometry.lineSegment.new(startX, startY, endX, endY)
+                        local lineOut         = playdate.geometry.lineSegment.new(endX, endY, startX, startY)
+                        enemy.bouncing        = true
+                        local easingFunctions = { pd.easingFunctions.outCubic, pd.easingFunctions.inCubic }
+                        enemy.animator        = gfx.animator.new(duration, parts, easingFunctions)
                     end
                 end
+            end
+        elseif not isMoonRotating and enemy.bouncing then
+            enemy.sprite:moveTo(enemy.animator:currentValue())
+            if enemy.animator and enemy.animator:ended() then
+                enemy.bouncing = false
+                enemy.animator = nil
             end
         end
     end
