@@ -32,7 +32,8 @@ local mode = "building"
 -- Tags
 TAGS = {
     building = 1,
-    laser = 2
+    laser = 2,
+    enemy = 3
 }
 
 --Background
@@ -48,6 +49,7 @@ local moonCenterX, moonCenterY = 200, 340
 local moonRadius = 240
 local moonFrameCount = 113
 local currentFrame = 1
+local isMoonRotating = false
 local moonSriteTable = assets.getImagetable("images/moon.png")
 local moonSprite = gfx.sprite.new(moonSriteTable[currentFrame])
 moonSprite:moveTo(moonCenterX, moonCenterY)
@@ -70,6 +72,7 @@ laserCursorSprite:add()
 
 -- Buildings
 local buildings = {}
+local targetBuildings = 20
 
 -- Building images
 local buildingFrameCount = 4
@@ -89,6 +92,19 @@ local nextBuilding
 -- Lasers
 local laserSpeed = 2
 local lasers = {}
+
+-- Enemies
+local enemySpeed = 2
+local baseSpawnRate = 1 / 5 -- roughly one enemy every 5 seconds
+local enemySpawnTimer = 0
+local enemies = {}
+
+local enemyImage = gfx.image.new(16, 16) -- Create a simple enemy image
+gfx.pushContext(enemyImage)
+gfx.setColor(gfx.kColorBlack)
+gfx.fillCircleAtPoint(8, 8, 8)
+gfx.popContext()
+
 
 -- Track overall rotations
 local overallRotations = 0
@@ -157,13 +173,18 @@ function cycleBuilding()
     nextBuilding:add()
 end
 
-function placeBuilding()
-    local x, y = buildingCursorSprite:getPosition()
+function getAngleDistRot(x, y)
     local dx = x - moonCenterX
     local dy = y - moonCenterY
     local angle = math.atan(dy, dx)
     local distance = math.sqrt(dx * dx + dy * dy)
     local initialRotation = overallRotations * (2 * math.pi / crankRotationsPerFullTraversal)
+    return angle, distance, initialRotation
+end
+
+function placeBuilding()
+    local x, y = buildingCursorSprite:getPosition()
+    local angle, distance, initialRotation = getAngleDistRot(x, y)
 
     local buildingx, buildingy, buildingWidth, buildingHeight = nextBuilding:getBounds()
     nextBuilding:setCollideRect(0, 0, buildingWidth, buildingHeight)
@@ -179,7 +200,7 @@ function placeBuilding()
         return false
     end
     table.insert(buildings,
-        { sprite = nextBuilding, angle = angle, distance = distance, initialRotation = initialRotation })
+        { sprite = nextBuilding, angle = angle, distance = distance, initialRotation = initialRotation, health = 100 })
     score += 1
     return true
 end
@@ -190,7 +211,7 @@ function fireLaser()
     laserSprite:setCollideRect(0, 0, 16, 16)
     laserSprite:setGroups({ TAGS.laser })
     laserSprite:setTag(TAGS.laser)
-    laserSprite:setCollidesWithGroups({ TAGS.building })
+    laserSprite:setCollidesWithGroups({ TAGS.enemy })
     laserSprite:add()
 
     local startX = math.random(0, 400)
@@ -199,6 +220,64 @@ function fireLaser()
     laserSprite:moveTo(startX, startY)
     laserSprite:setVisible(true)
     table.insert(lasers, { sprite = laserSprite, speed = laserSpeed, targetX = laserTargetX, targetY = laserTargetY })
+end
+
+function calculateEnemySpawnRate()
+    -- Scale spawn rate exponentially based on the number of buildings
+    local spawnRate = baseSpawnRate * (1 - math.exp(-0.1 * (#buildings)))
+    return spawnRate
+end
+
+local function createEnemy()
+    local enemySprite = gfx.sprite.new(enemyImage)
+    enemySprite:setCollideRect(0, 0, 16, 16)
+    enemySprite:setZIndex(50)
+    enemySprite:setGroups({ TAGS.enemy })
+    enemySprite:setTag(TAGS.enemy)
+    enemySprite:setCollidesWithGroups({ TAGS.laser, TAGS.building, TAGS.enemy })
+    enemySprite:add()
+    return enemySprite
+end
+
+function spawnEnemy()
+    local angle = math.random() * 2 * math.pi
+    local distance = moonRadius
+    local x = moonCenterX + distance * math.cos(angle)
+    local y = moonCenterY + distance * math.sin(angle)
+    local initialRotation = overallRotations * (2 * math.pi / crankRotationsPerFullTraversal)
+
+    local enemySprite = createEnemy()
+    enemySprite:moveTo(x, y)
+    table.insert(enemies,
+        {
+            sprite = enemySprite,
+            target = nil,
+            angle = angle,
+            distance = distance,
+            initialRotation = initialRotation,
+            speed = enemySpeed,
+            health = 100
+        })
+end
+
+function findNearestBuilding(enemy)
+    local nearestBuilding = nil
+    local nearestDistance = math.huge
+
+    for _, building in ipairs(buildings) do
+        local buildingX, buildingY = building.sprite:getPosition()
+        local enemyX, enemyY = enemy.sprite:getPosition()
+        local dx = buildingX - enemyX
+        local dy = buildingY - enemyY
+        local distance = math.sqrt(dx * dx + dy * dy)
+
+        if distance < nearestDistance then
+            nearestDistance = distance
+            nearestBuilding = building
+        end
+    end
+
+    return nearestBuilding
 end
 
 -- Handle A button press to perform action
@@ -236,6 +315,9 @@ function updateMoon()
     overallRotations = overallRotations + deltaCrankPosition / 360
     lastCrankPosition = crankPosition
 
+    -- Update the moon rotation flag
+    isMoonRotating = (deltaCrankPosition ~= 0)
+
     local scaledCrankPosition = overallRotations / crankRotationsPerFullTraversal
     local frameIndex = math.floor((scaledCrankPosition % 1) * moonFrameCount) + 1
     frameIndex = math.max(1, math.min(frameIndex, moonFrameCount))
@@ -254,6 +336,14 @@ function updateMoon()
             local x = moonCenterX + building.distance * math.cos(newAngle)
             local y = moonCenterY + building.distance * math.sin(newAngle)
             building.sprite:moveTo(x, y)
+        end
+
+        -- Update the positions of the enemies
+        for _, enemy in ipairs(enemies) do
+            local newAngle = enemy.angle + (totalRotation - enemy.initialRotation)
+            local x = moonCenterX + enemy.distance * math.cos(newAngle)
+            local y = moonCenterY + enemy.distance * math.sin(newAngle)
+            enemy.sprite:moveTo(x, y)
         end
     end
 end
@@ -278,11 +368,17 @@ function updateLasers()
             if length > 0 then -- Check for collisions
                 for _, collision in ipairs(collisions) do
                     local collisionTag = collision.other:getTag()
-                    if collisionTag == TAGS.building then
+                    if collisionTag == TAGS.enemy then
+                        local enemy = collision.other
                         laser.sprite:remove()
-                        collision.other:remove()
+                        enemy:remove()
+                        for i = #enemies, 1, -1 do
+                            if enemies[i] == enemy then
+                                table.remove(enemies, i)
+                                break
+                            end
+                        end
                         laser.delete = true
-                        score -= 1
                     end
                 end
             end
@@ -296,18 +392,100 @@ function updateLasers()
     end
 end
 
+function updateEnemies()
+    for i = #enemies, 1, -1 do
+        local enemy = enemies[i]
+
+        if not enemy.target then
+            enemy.target = findNearestBuilding(enemy)
+        end
+
+        if enemy.target and not isMoonRotating then
+            local targetx, targety = enemy.target.sprite:getPosition()
+            local enemyX, enemyY = enemy.sprite:getPosition()
+            local dx = targetx - enemyX
+            local dy = targety - enemyY
+            local distance = math.sqrt(dx * dx + dy * dy)
+            enemy.distance = distance
+
+            local angle = math.atan(dy, dx)
+            local x = enemyX + enemySpeed * math.cos(angle)
+            local y = enemyY + enemySpeed * math.sin(angle)
+            local _actualX, _actualY, collisions, length = enemy.sprite:moveWithCollisions(x, y)
+
+            -- Update enemy's angle and distance
+            local newAngle, newDistance, newInitialRotation = getAngleDistRot(_actualX, _actualY)
+            enemy.angle = newAngle
+            enemy.distance = newDistance
+            enemy.initialRotation = newInitialRotation
+
+            enemy.moved = true
+            if length > 0 then -- Check for collisions
+                for _, collision in ipairs(collisions) do
+                    local collidedBuilding = collision.other
+                    local collisionTag = collidedBuilding:getTag()
+                    if collisionTag == TAGS.building then
+                        attackBuilding(enemy, collidedBuilding)
+                    end
+                end
+            end
+        end
+    end
+end
+
+function attackBuilding(enemy, building)
+    --get building
+    local foundBuilding = nil
+    for _, b in ipairs(buildings) do
+        if b.sprite == building then
+            foundBuilding = b
+            break
+        end
+    end
+
+    if not foundBuilding then
+        return
+    end
+
+    -- Implement attack logic here
+    foundBuilding.health -= 1
+    if foundBuilding.health <= 0 then
+        if (enemy.target == foundBuilding) then
+            enemy.target = nil
+        end
+        foundBuilding.sprite:remove()
+        -- Remove building from the buildings table
+        for i = #buildings, 1, -1 do
+            if buildings[i] == foundBuilding then
+                table.remove(buildings, i)
+                break
+            end
+        end
+    end
+end
+
 -- playdate.update function is required in every project!
 function playdate.update()
     -- Clear screen
     gfx.sprite.update()
     pd.drawFPS(385, 225)
 
+    local enemySpawnRate = calculateEnemySpawnRate()
+    enemySpawnTimer = pd.getElapsedTime()
+    if enemySpawnTimer > 1 / enemySpawnRate and #buildings > 0 then
+        spawnEnemy()
+        enemySpawnTimer = 0
+        pd.resetElapsedTime()
+    end
+
     updateCursor()
     updateMoon()
     updateLasers()
+    updateEnemies()
 
     gfx.drawTextAligned("Score: " .. score, 390, 5, kTextAlignment.right)
 end
 
 --Init
 cycleBuilding()
+pd.resetElapsedTime()
