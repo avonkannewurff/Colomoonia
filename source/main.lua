@@ -12,31 +12,49 @@ local gfx <const> = playdate.graphics
 local assets <const> = Assets
 local utilities <const> = Utilities
 
--- Preload Images
+-- Preload Images and Image Tables
 assets.preloadImages({ "images/stars" })
-assets.preloadImagetable("images/moon.png")
-assets.preloadImagetable("images/selector")
 assets.preloadImages({ "images/cursor_32-32", "images/cursor_64-64" })
 assets.preloadImages({ "images/house", "images/dish", "images/small_tower", "images/tank" })
 assets.preloadImages({ "images/laser_16-16" })
 assets.preloadImages({ "images/enemy_24-24" })
+assets.preloadImages({ "images/enemy_attack_24-24" })
+
+assets.preloadImagetable("images/moon")
+assets.preloadImagetable("images/selector")
+assets.preloadImagetable("images/house")
+assets.preloadImagetable("images/satellite")
+assets.preloadImagetable("images/small_tower")
+assets.preloadImagetable("images/tank")
+assets.preloadImagetable("images/enemy")
 
 -- Setup
 pd.display.setRefreshRate(30)
 local sasserFont = gfx.font.new("fonts/Sasser Slab/Sasser-Slab")
-gfx.setImageDrawMode(gfx.kDrawModeNXOR)
 gfx.setFont(sasserFont)
 
 --Game State
+local gameState = "intro" -- Initialize game state
 local score = 0
+local highestScore = 0
 local enemiesKilled = 0
+local lasersShot = 0
 local mode = "building"
+local crankIndicator = pd.ui.crankIndicator
 
 -- Tags
 TAGS = {
     building = 1,
     laser = 2,
     enemy = 3
+}
+
+ZINDEX = {
+    moon = 0,
+    building = 10,
+    enemy = 30,
+    laser = 50,
+    cursor = 100
 }
 
 --Background
@@ -52,9 +70,10 @@ local moonCenterX, moonCenterY = 200, 340
 local moonRadius = 240
 local moonFrameCount = 113
 local currentFrame = 1
-local isMoonRotating = false
+isMoonRotating = false
 local moonSriteTable = assets.getImagetable("images/moon.png")
 local moonSprite = gfx.sprite.new(moonSriteTable[currentFrame])
+moonSprite:setZIndex(ZINDEX.moon)
 moonSprite:moveTo(moonCenterX, moonCenterY)
 moonSprite:add()
 
@@ -65,31 +84,37 @@ local buildingCursorSprite = gfx.sprite.new(cursorImage)
 local selectorImagetable = assets.getImagetable("images/selector")
 local laserCursorSprite = utilities.animatedSprite(200, 120, selectorImagetable, 50, true)
 buildingCursorSprite:moveTo(200, 120)
-buildingCursorSprite:setZIndex(100)
+buildingCursorSprite:setZIndex(ZINDEX.cursor)
 buildingCursorSprite:add()
 
 laserCursorSprite:setIgnoresDrawOffset(true)
 laserCursorSprite:setVisible(false)
-laserCursorSprite:setZIndex(100)
+laserCursorSprite:setZIndex(ZINDEX.cursor)
 laserCursorSprite:add()
 
 -- Buildings
-local buildings = {}
-local buildingHealth = 50
+buildings = {}
+local buildingHealth = 20
 -- Building images
 local buildingFrameCount = 4
 local currentBuildingFrame = 1
 local buildingImages = {}
-buildingImages[0] = assets.getImage("images/house")
-buildingImages[1] = assets.getImage("images/dish")
-buildingImages[2] = assets.getImage("images/small_tower")
-buildingImages[3] = assets.getImage("images/tank")
+buildingImages[1] = assets.getImage("images/house")
+buildingImages[2] = assets.getImage("images/dish")
+buildingImages[3] = assets.getImage("images/small_tower")
+buildingImages[4] = assets.getImage("images/tank")
+
+local buildingImagetables = {}
+buildingImagetables[1] = assets.getImagetable("images/house")
+buildingImagetables[2] = assets.getImagetable("images/satellite")
+buildingImagetables[3] = assets.getImagetable("images/small_tower")
+buildingImagetables[4] = assets.getImagetable("images/tank")
 
 local buildingSprites = {}
 for i = 0, #buildingImages do
     buildingSprites[i] = gfx.sprite.new(buildingImages[i])
 end
-local nextBuilding
+local nextBuildingSprite
 
 -- Lasers
 local laserSpeed = 3
@@ -101,11 +126,105 @@ local enemySpeed = 2
 local baseSpawnRate = 0.01
 local buildingsScale = 0.01
 local enemySpawnTimer = 0
-local enemies = {}
+enemies = {}
 
 local enemyImage = assets.getImage("images/enemy_24-24")
+local enemyAttackImage = assets.getImage("images/enemy_attack_24-24")
+local numAttackFrames = 10
 
+-- Enemy Class
+Enemy = {}
+Enemy.__index = Enemy
 
+function Enemy:new(x, y, initialRotation)
+    local self = setmetatable({}, Enemy)
+    self.sprite = gfx.sprite.new(enemyImage)
+    self.sprite:setCollideRect(0, 0, self.sprite:getSize())
+    self.sprite:setZIndex(ZINDEX.enemy)
+    self.sprite:setGroups({ TAGS.enemy })
+    self.sprite:setTag(TAGS.enemy)
+    self.sprite:setCollidesWithGroups({ TAGS.laser, TAGS.building })
+    self.sprite:moveTo(x, y)
+    self.sprite:isVisible(true)
+    self.sprite:add()
+
+    self.attackSprite = utilities.animatedSprite(x, y, "images/enemy", 100, true)
+    self.attackSprite:setCollideRect(0, 0, self.attackSprite:getSize())
+    self.attackSprite:setZIndex(ZINDEX.enemy)
+    self.attackSprite:setGroups({ TAGS.enemy })
+    self.attackSprite:setTag(TAGS.enemy)
+    self.attackSprite:setCollidesWithGroups({ TAGS.laser, TAGS.building })
+    self.attackSprite:moveTo(x, y)
+    self.attackSprite:setVisible(false)
+    self.attackSprite:add()
+
+    self.target = nil
+    self.angle = 0
+    self.distance = 0
+    self.initialRotation = initialRotation
+    self.speed = enemySpeed
+    self.health = 100
+    self.attacking = false
+
+    return self
+end
+
+--Currently always moving both sprites because they both need to move when the moon rotates
+-- This function is only called to adjust for moon rotation
+function Enemy:moveTo(x, y)
+    self.attackSprite:moveTo(x, y)
+    self.sprite:moveTo(x, y)
+end
+
+function Enemy:moveWithCollisions(x, y)
+    if self.attacking then
+        self.sprite:moveWithCollisions(x, y)
+        return self.attackSprite:moveWithCollisions(x, y)
+    else
+        self.attackSprite:moveWithCollisions(x, y)
+        return self.sprite:moveWithCollisions(x, y)
+    end
+end
+
+function Enemy:startAttack()
+    local x, y = self.sprite:getPosition()
+    self:moveTo(x, y)
+    self.attackSprite:setVisible(true)
+    self.sprite:setVisible(false)
+    self.attacking = true
+end
+
+function Enemy:stopAttack()
+    self.attacking = false
+    self.attackSprite:setVisible(false)
+    self.sprite:setVisible(true)
+end
+
+-- Building Class
+Building = {}
+Building.__index = Building
+
+function Building:new(x, y, buildingType, angle, distance, initialRotation)
+    local self = setmetatable({}, Building)
+    self.index = buildingType
+    self.sprite = nextBuildingSprite:copy()
+    self.sprite:setZIndex(ZINDEX.building)
+    self.sprite:setGroups({ TAGS.building })
+    self.sprite:setTag(TAGS.building)
+    self.sprite:setCollidesWithGroups({ TAGS.building, TAGS.laser })
+    local buildingx, buildingy, buildingWidth, buildingHeight = self.sprite:getBounds()
+    self.sprite:setCollideRect(0, 0, buildingWidth, buildingHeight)
+    self.sprite:moveTo(x, y)
+
+    self.sprite:add()
+
+    self.angle = angle
+    self.distance = distance
+    self.initialRotation = initialRotation
+    self.health = buildingHealth
+
+    return self
+end
 
 -- Track overall rotations
 local overallRotations = 0
@@ -114,7 +233,7 @@ local lastCrankPosition = pd.getCrankPosition()
 function updateCursor()
     local x, y = buildingCursorSprite:getPosition()
     if mode == "building" then
-        local buildingx, buildingy, buildingWidth, buildingHeight = nextBuilding:getBounds()
+        local buildingx, buildingy, buildingWidth, buildingHeight = nextBuildingSprite:getBounds()
         if buildingWidth == 32 then
             cursorImage = assets.getImage("images/cursor_32-32")
         elseif buildingWidth == 64 then
@@ -159,20 +278,23 @@ function updateCursor()
     laserCursorSprite:moveTo(x, y)
 end
 
-function cycleBuilding()
-    currentBuildingFrame = (currentBuildingFrame + math.random(2)) % buildingFrameCount
-    nextBuilding = buildingSprites[currentBuildingFrame]:copy()
-    nextBuilding:setZIndex(50)
-    nextBuilding:setGroups({ TAGS.building })
-    nextBuilding:setTag(TAGS.building)
-    nextBuilding:setCollidesWithGroups({ TAGS.building, TAGS.laser })
-    local buildingx, buildingy, buildingWidth, buildingHeight = nextBuilding:getBounds()
-    if buildingWidth == 32 then
-        nextBuilding:moveTo(16, 16)
-    elseif buildingWidth == 64 then
-        nextBuilding:moveTo(32, 32)
+function cycleBuildingSprite()
+    if nextBuildingSprite then
+        nextBuildingSprite:remove()
     end
-    nextBuilding:add()
+    currentBuildingFrame = (currentBuildingFrame + math.random(2)) % buildingFrameCount + 1
+    nextBuildingSprite = buildingSprites[currentBuildingFrame]:copy()
+    nextBuildingSprite:setZIndex(ZINDEX.building)
+    nextBuildingSprite:setGroups({ TAGS.building })
+    nextBuildingSprite:setTag(TAGS.building)
+    nextBuildingSprite:setCollidesWithGroups({ TAGS.building, TAGS.laser })
+    local buildingx, buildingy, buildingWidth, buildingHeight = nextBuildingSprite:getBounds()
+    if buildingWidth == 32 then
+        nextBuildingSprite:moveTo(16, 16)
+    elseif buildingWidth == 64 then
+        nextBuildingSprite:moveTo(32, 32)
+    end
+    nextBuildingSprite:add()
 end
 
 function getAngleDistRot(x, y)
@@ -188,29 +310,15 @@ function placeBuilding()
     local x, y = buildingCursorSprite:getPosition()
     local angle, distance, initialRotation = getAngleDistRot(x, y)
 
-    local buildingx, buildingy, buildingWidth, buildingHeight = nextBuilding:getBounds()
-    nextBuilding:setCollideRect(0, 0, buildingWidth, buildingHeight)
-    nextBuilding:moveTo(x, y)
-    nextBuilding:add()
-    local overlap = nextBuilding:overlappingSprites()
+    local building = Building:new(x, y, currentBuildingFrame, angle, distance, initialRotation)
+    local overlap = building.sprite:overlappingSprites()
     if #overlap > 0 then
-        if buildingWidth == 32 then
-            nextBuilding:moveTo(16, 16)
-        elseif buildingWidth == 64 then
-            nextBuilding:moveTo(32, 32)
-        end
+        building.sprite:remove()
         return false
     end
-    table.insert(buildings,
-        {
-            sprite = nextBuilding,
-            angle = angle,
-            distance = distance,
-            initialRotation = initialRotation,
-            health =
-                buildingHealth
-        })
+    table.insert(buildings, building)
     score += 1
+    highestScore += 1
     return true
 end
 
@@ -220,8 +328,11 @@ function fireLaser()
     laserSprite:setCollideRect(0, 0, 16, 16)
     laserSprite:setGroups({ TAGS.laser })
     laserSprite:setTag(TAGS.laser)
+    laserSprite:setZIndex(ZINDEX.laser)
     laserSprite:setCollidesWithGroups({ TAGS.enemy })
     laserSprite:add()
+
+    lasersShot += 1
 
     local startX = math.random(0, 400)
     local startY = 0
@@ -239,18 +350,6 @@ function calculateEnemySpawnRate()
     return baseSpawnRate + buildingsScale * #buildings
 end
 
-function createEnemy()
-    local enemySprite = gfx.sprite.new(enemyImage)
-    enemySprite:setCollideRect(0, 0, enemySprite:getSize())
-    enemySprite:setZIndex(10)
-    enemySprite:setGroups({ TAGS.enemy })
-    enemySprite:setTag(TAGS.enemy)
-    -- enemySprite.collisionResponse = function(self, other) return gfx.sprite.kCollisionTypeBounce end
-    enemySprite:setCollidesWithGroups({ TAGS.laser, TAGS.building })
-    enemySprite:add()
-    return enemySprite
-end
-
 function spawnEnemy()
     local angle = math.random() * 2 * math.pi
     local distance = moonRadius
@@ -258,18 +357,8 @@ function spawnEnemy()
     local y = moonCenterY + distance * math.sin(angle)
     local initialRotation = overallRotations * (2 * math.pi / crankRotationsPerFullTraversal)
 
-    local enemySprite = createEnemy()
-    enemySprite:moveTo(x, y)
-    table.insert(enemies,
-        {
-            sprite = enemySprite,
-            target = nil,
-            angle = angle,
-            distance = distance,
-            initialRotation = initialRotation,
-            speed = enemySpeed,
-            health = 100
-        })
+    local enemy = Enemy:new(x, y, initialRotation)
+    table.insert(enemies, enemy)
 end
 
 function findNearestBuilding(enemy)
@@ -294,15 +383,31 @@ end
 
 -- Handle A button press to perform action
 function playdate.AButtonDown()
-    if mode == "building" then
-        -- Only cycle to next building once we've placed the current
-        if (placeBuilding()) then
-            cycleBuilding()
+    if gameState == "intro" then
+        gameState = "instructions"
+    elseif gameState == "instructions" then
+        gameState = "playing"
+        cycleBuildingSprite() -- Initialize the first building
+        pd.resetElapsedTime() -- Reset the game timer
+    elseif gameState == "playing" then
+        -- Existing A button logic
+        if mode == "building" then
+            if (placeBuilding()) then
+                cycleBuildingSprite()
+            end
+        elseif mode == "laser" then
+            if #lasers < maxLasers then
+                fireLaser()
+            end
         end
-    elseif mode == "laser" then
-        if #lasers < maxLasers then
-            fireLaser()
-        end
+    elseif gameState == "gameOver" then
+        -- Reset game variables and restart the game
+        score = 0
+        enemiesKilled = 0
+        buildings = {}
+        lasers = {}
+        enemies = {}
+        gameState = "playing"
     end
 end
 
@@ -330,7 +435,7 @@ function updateMoon()
     lastCrankPosition = crankPosition
 
     -- Update the moon rotation flag
-    isMoonRotating = (deltaCrankPosition ~= 0)
+    isMoonRotating = (math.abs(deltaCrankPosition) > 0.1) -- Check for a minimum crank movement
 
     local scaledCrankPosition = overallRotations / crankRotationsPerFullTraversal
     local frameIndex = math.floor((scaledCrankPosition % 1) * moonFrameCount) + 1
@@ -357,7 +462,7 @@ function updateMoon()
             local newAngle = enemy.angle + (totalRotation - enemy.initialRotation)
             local x = moonCenterX + enemy.distance * math.cos(newAngle)
             local y = moonCenterY + enemy.distance * math.sin(newAngle)
-            enemy.sprite:moveTo(x, y)
+            enemy:moveTo(x, y)
         end
     end
 end
@@ -386,13 +491,25 @@ function updateLasers()
                         enemiesKilled += 1
                         local enemy = collision.other
                         laser.sprite:remove()
-                        for i = #enemies, 1, -1 do
-                            if enemies[i].sprite == enemy then
-                                table.remove(enemies, i)
+                        local foundEnemy = nil
+                        for _, e in ipairs(enemies) do
+                            if e.sprite == enemy or e.attackSprite == enemy then
+                                foundEnemy = e
+                                foundEnemy.attackSprite:remove()
+                                foundEnemy.sprite:remove()
                                 break
                             end
                         end
-                        enemy:remove()
+                        if foundEnemy then
+                            for i = #enemies, 1, -1 do
+                                if enemies[i] == foundEnemy then
+                                    table.remove(enemies, i)
+                                    break
+                                end
+                            end
+                        else
+                            print("Enemy not found")
+                        end
                         laser.delete = true
                     end
                 end
@@ -415,7 +532,7 @@ function updateEnemies()
             enemy.target = findNearestBuilding(enemy)
         end
 
-        if enemy.target and not isMoonRotating and not enemy.bouncing then
+        if enemy.target and not isMoonRotating then
             local targetx, targety = enemy.target.sprite:getPosition()
             local enemyX, enemyY = enemy.sprite:getPosition()
             local dx = targetx - enemyX
@@ -423,11 +540,12 @@ function updateEnemies()
             local distance = math.sqrt(dx * dx + dy * dy)
 
             local angle = math.atan(dy, dx)
-            local newX = enemyX + enemySpeed * math.cos(angle)
-            local newY = enemyY + enemySpeed * math.sin(angle)
-            local actualX, actualY, collisions, length = enemy.sprite:moveWithCollisions(newX, newY)
+            local newX = enemyX + enemy.speed * math.cos(angle)
+            local newY = enemyY + enemy.speed * math.sin(angle)
+            local actualX, actualY, collisions, length = enemy:moveWithCollisions(newX, newY)
 
             -- Update enemy's angle and distance
+            -- This is needed to make sure that the enemies don't jump in movement during the next moon rotation
             local newAngle, newDistance, newInitialRotation = getAngleDistRot(actualX, actualY)
             enemy.angle = newAngle
             enemy.distance = newDistance
@@ -439,35 +557,17 @@ function updateEnemies()
                     local collisionTag = collidedBuilding:getTag()
                     if collisionTag == TAGS.building then
                         attackBuilding(enemy, collidedBuilding)
-
-                        -- Bounce off the building
-                        local bounceAngle     = math.pi + angle -- Reverse the angle
-                        local bounceX         = actualX + enemy.speed * 2 * math.cos(bounceAngle)
-                        local bounceY         = actualY + enemy.speed * 2 *
-                            math.sin(bounceAngle)
-
-                        -- Create bounce animation
-                        local startX, startY  = actualX, actualY
-                        local endX, endY      = bounceX, bounceY
-                        local duration        = { 250, 250 } -- milliseconds
-
-                        local parts           = {
-                            playdate.geometry.lineSegment.new(startX, startY, endX, endY),
-                            playdate.geometry.lineSegment.new(endX, endY, startX, startY)
-                        }
-                        local lineIn          = playdate.geometry.lineSegment.new(startX, startY, endX, endY)
-                        local lineOut         = playdate.geometry.lineSegment.new(endX, endY, startX, startY)
-                        enemy.bouncing        = true
-                        local easingFunctions = { pd.easingFunctions.outCubic, pd.easingFunctions.inCubic }
-                        enemy.animator        = gfx.animator.new(duration, parts, easingFunctions)
                     end
                 end
+            else
+                if enemy.attacking then
+                    enemy:stopAttack()
+                    enemy.target = findNearestBuilding(enemy)
+                end
             end
-        elseif not isMoonRotating and enemy.bouncing then
-            enemy.sprite:moveTo(enemy.animator:currentValue())
-            if enemy.animator and enemy.animator:ended() then
-                enemy.bouncing = false
-                enemy.animator = nil
+        elseif enemy.target and not isMoonRotating and not enemy.attacking then
+            if not enemy.target.sprite then
+                enemy.target = findNearestBuilding(enemy)
             end
         end
     end
@@ -484,16 +584,25 @@ function attackBuilding(enemy, building)
     end
 
     if not foundBuilding then
+        enemy:stopAttack()
+        enemy.target = nil
         return
     end
 
+    --TODO : Flip on x as needed
+    if not enemy.attacking then
+        enemy:startAttack()
+    end
+
     -- Implement attack logic here
-    foundBuilding.health -= 1
+    foundBuilding.health -= 0.1
     if foundBuilding.health <= 0 then
         score -= 1
         if (enemy.target == foundBuilding) then
             enemy.target = nil
         end
+
+        enemy:stopAttack()
         foundBuilding.sprite:remove()
         -- Remove building from the buildings table
         for i = #buildings, 1, -1 do
@@ -508,30 +617,77 @@ end
 -- playdate.update function is required in every project!
 function playdate.update()
     -- Clear screen
-    gfx.sprite.update()
-    pd.drawFPS(385, 225)
 
-    if #enemies < 5 then
-        local enemySpawnRate = calculateEnemySpawnRate()
-        enemySpawnTimer = pd.getElapsedTime()
-        if enemySpawnTimer > 1 / enemySpawnRate and #buildings > 0 then
-            spawnEnemy()
-            enemySpawnTimer = 0
-            pd.resetElapsedTime()
+
+    if gameState == "intro" then
+        drawIntroScreen()
+        return
+    elseif gameState == "instructions" then
+        drawInstrunctionsScreen()
+        return
+    elseif gameState == "playing" then
+        gfx.sprite.update()
+        if pd.isCrankDocked() then
+            gfx.setImageDrawMode(gfx.kDrawModeCopy)
+            crankIndicator:draw()
         end
+        pd.drawFPS(0, 225)
+        if score <= 0 and #enemies > 0 then
+            gameState = "gameOver"
+            return
+        end
+
+        if #enemies < 5 then
+            local enemySpawnRate = calculateEnemySpawnRate()
+            enemySpawnTimer = pd.getElapsedTime()
+            if enemySpawnTimer > 1 / enemySpawnRate and #buildings > 0 then
+                spawnEnemy()
+                enemySpawnTimer = 0
+                pd.resetElapsedTime()
+            end
+        end
+
+        updateCursor()
+        updateMoon()
+        updateLasers()
+        updateEnemies()
+
+        gfx.setImageDrawMode(gfx.kDrawModeNXOR)
+        gfx.drawTextAligned("Buildings: " .. score, 390, 5, kTextAlignment.right)
+        gfx.drawTextAligned("Zapped: " .. enemiesKilled, 390, 25, kTextAlignment.right)
+        gfx.drawTextAligned("Lasers: " .. maxLasers - #lasers, 160, 5, kTextAlignment.right)
+    elseif gameState == "gameOver" then
+        drawGameOverScreen()
     end
+end
 
+function drawIntroScreen()
+    gfx.clear()
+    gfx.drawTextAligned("Colomoonia!", 200, 30, kTextAlignment.center)
+    gfx.drawTextAligned("Build your colony", 200, 100, kTextAlignment.center)
+    gfx.drawTextAligned("and protect it from moon creatures!", 200, 120, kTextAlignment.center)
+    gfx.drawTextAligned("Press A to continue", 200, 220, kTextAlignment.center)
+end
 
-    updateCursor()
-    updateMoon()
-    updateLasers()
-    updateEnemies()
+function drawInstrunctionsScreen()
+    gfx.clear()
+    gfx.drawTextAligned("Controls", 200, 30, kTextAlignment.center)
+    gfx.drawTextAligned("- Use the crank to rotate the moon", 10, 90, kTextAlignment.left)
+    gfx.drawTextAligned("- Press A to place buildings or shoot lasers", 10, 110, kTextAlignment.left)
+    gfx.drawTextAligned("- Press B to toggle building/laser mode", 10, 130, kTextAlignment.left)
+    gfx.drawTextAligned("Press A to start", 200, 220, kTextAlignment.center)
+end
 
-    gfx.drawTextAligned("Score: " .. score, 390, 5, kTextAlignment.right)
-    gfx.drawTextAligned("Killed: " .. enemiesKilled, 390, 25, kTextAlignment.right)
-    gfx.drawTextAligned("Ammo: " .. maxLasers - #lasers, 160, 5, kTextAlignment.right)
+function drawGameOverScreen()
+    gfx.clear()
+    gfx.drawTextAligned("Game Over", 200, 30, kTextAlignment.center)
+    gfx.drawTextAligned("Total Buldings Placed: " .. highestScore, 200, 90, kTextAlignment.center)
+    gfx.drawTextAligned("Lasers Shot: " .. lasersShot, 200, 110, kTextAlignment.center)
+    gfx.drawTextAligned("Creatures Zapped: " .. enemiesKilled, 200, 130, kTextAlignment.center)
+    gfx.drawTextAligned("Press A to Restart", 200, 220, kTextAlignment.center)
 end
 
 --Init
-cycleBuilding()
+cycleBuildingSprite()
 pd.resetElapsedTime()
+-- spawnEnemy()
