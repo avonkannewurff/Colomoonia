@@ -27,6 +27,7 @@ gfx.setFont(sasserFont)
 
 --Game State
 local score = 0
+local enemiesKilled = 0
 local mode = "building"
 
 -- Tags
@@ -91,11 +92,13 @@ local nextBuilding
 
 -- Lasers
 local laserSpeed = 2
+local maxLasers = 10
 local lasers = {}
 
 -- Enemies
 local enemySpeed = 2
-local baseSpawnRate = 1 / 5 -- roughly one enemy every 5 seconds
+local baseSpawnRate = 0.01
+local buildingsScale = 0.01
 local enemySpawnTimer = 0
 local enemies = {}
 
@@ -223,9 +226,11 @@ function fireLaser()
 end
 
 function calculateEnemySpawnRate()
+    local elapsedTime = pd.getElapsedTime()
+
     -- Scale spawn rate exponentially based on the number of buildings
-    local spawnRate = baseSpawnRate * (1 - math.exp(-0.1 * (#buildings)))
-    return spawnRate
+    -- return baseSpawnRate * (1 - math.exp(-0.1 * (#buildings))) + (pd.getElapsedTime() / 10000)
+    return baseSpawnRate + buildingsScale * #buildings
 end
 
 local function createEnemy()
@@ -288,7 +293,9 @@ function playdate.AButtonDown()
             cycleBuilding()
         end
     elseif mode == "laser" then
-        fireLaser()
+        if #lasers < maxLasers then
+            fireLaser()
+        end
     end
 end
 
@@ -369,6 +376,7 @@ function updateLasers()
                 for _, collision in ipairs(collisions) do
                     local collisionTag = collision.other:getTag()
                     if collisionTag == TAGS.enemy then
+                        enemiesKilled += 1
                         local enemy = collision.other
                         laser.sprite:remove()
                         enemy:remove()
@@ -450,6 +458,7 @@ function attackBuilding(enemy, building)
     -- Implement attack logic here
     foundBuilding.health -= 1
     if foundBuilding.health <= 0 then
+        score -= 1
         if (enemy.target == foundBuilding) then
             enemy.target = nil
         end
@@ -470,13 +479,16 @@ function playdate.update()
     gfx.sprite.update()
     pd.drawFPS(385, 225)
 
-    local enemySpawnRate = calculateEnemySpawnRate()
-    enemySpawnTimer = pd.getElapsedTime()
-    if enemySpawnTimer > 1 / enemySpawnRate and #buildings > 0 then
-        spawnEnemy()
-        enemySpawnTimer = 0
-        pd.resetElapsedTime()
+    if #enemies < 5 then
+        local enemySpawnRate = calculateEnemySpawnRate()
+        enemySpawnTimer = pd.getElapsedTime()
+        if enemySpawnTimer > 1 / enemySpawnRate and #buildings > 0 then
+            spawnEnemy()
+            enemySpawnTimer = 0
+            pd.resetElapsedTime()
+        end
     end
+
 
     updateCursor()
     updateMoon()
@@ -484,6 +496,8 @@ function playdate.update()
     updateEnemies()
 
     gfx.drawTextAligned("Score: " .. score, 390, 5, kTextAlignment.right)
+    gfx.drawTextAligned("Killed: " .. enemiesKilled, 390, 25, kTextAlignment.right)
+    gfx.drawTextAligned("Ammo: " .. maxLasers - #lasers, 160, 5, kTextAlignment.right)
 end
 
 --Init
