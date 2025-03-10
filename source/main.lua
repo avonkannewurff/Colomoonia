@@ -677,7 +677,7 @@ end
 function drawIntroScreen()
     gfx.clear()
     gfx.drawTextAligned("Colomoonia!", 200, 30, kTextAlignment.center)
-    gfx.drawTextAligned("Build your colony", 200, 100, kTextAlignment.center)
+    gfx.drawTextAligned("Colonize the moon! Build your colony", 200, 100, kTextAlignment.center)
     gfx.drawTextAligned("and protect it from moon creatures!", 200, 120, kTextAlignment.center)
     gfx.drawTextAligned("Press A to continue", 200, 220, kTextAlignment.center)
 end
