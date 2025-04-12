@@ -58,8 +58,11 @@ function Creature:new(x, y, initialRotation, enemyManager)
 end
 
 function Creature:update()
-    if not self.target then
+    if not self.target or self.target.health <= 0 then
         self.target = self.enemyManager:findNearestBuilding(self)
+        if not self.target then
+            return
+        end
     end
 
     if self.target and not self.enemyManager.moon.isMoonRotating then
@@ -109,19 +112,17 @@ function Creature:update()
 end
 
 function Creature:moveTo(x, y)
-    -- Move the appropriate sprite based on state
-    if self.attacking then
-        self.attackSprite:moveTo(x, y)
-    else
-        self.sprite:moveTo(x, y)
-    end
+    self.attackSprite:moveTo(x, y)
+    self.sprite:moveTo(x, y)
 end
 
 function Creature:moveWithCollisions(x, y)
     -- Move with collision detection using the appropriate sprite
     if self.attacking then
+        self.sprite:moveWithCollisions(x, y)
         return self.attackSprite:moveWithCollisions(x, y)
     else
+        self.attackSprite:moveWithCollisions(x, y)
         return self.sprite:moveWithCollisions(x, y)
     end
 end

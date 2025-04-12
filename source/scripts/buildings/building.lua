@@ -38,10 +38,14 @@ function Building:buildingDestroyed(attackVal)
     self.health -= attackVal
     if self.health <= 0 then
         audioManager.play(audioManager.sfx.crumble, 1)
-        self.sprite:remove()
-        -- Remove building from the buildings table (will be cleaned up by manager)
-        self.delete = true
+        self:remove()
     else
         return false
     end
+end
+
+function Building:remove()
+    self.sprite:remove()
+    -- Remove building from the buildings table (will be cleaned up by manager)
+    self.delete = true;
 end

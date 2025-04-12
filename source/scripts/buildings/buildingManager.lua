@@ -55,7 +55,7 @@ function BuildingManager:placeBuilding(buildingCursorSprite)
         self.nextBuildingSprite)
     local overlap = building.sprite:overlappingSprites()
     if #overlap > 0 then
-        building.sprite:remove()
+        building:remove()
         return false
     end
     audioManager.play(AudioManager.sfx.buildingPlace, 1)
