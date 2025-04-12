@@ -4149,7 +4149,9 @@ function playdate.graphics.image:transformedImage(xform) end
 ---@param tiltAngle number
 ---@param tile boolean
 ---@return nil
-function playdate.graphics.image:drawSampled(x, y, width, height, centerx, centery, dxx, dyx, dxy, dyy, dx, dy, z, tiltAngle, tile) end
+function playdate.graphics.image:drawSampled(x, y, width, height, centerx, centery, dxx, dyx, dxy, dyy, dx, dy, z,
+                                             tiltAngle, tile)
+end
 
 --- Sets the image’s mask to a copy of *maskImage*.
 ---
@@ -5859,7 +5861,9 @@ function playdate.graphics.sprite.new(image_or_tilemap) end
 ---@param alignment? integer
 ---@param font? _Font
 ---@return _Sprite
-function playdate.graphics.sprite.spriteWithText(text, maxWidth, maxHeight, backgroundColor, leadingAdjustment, truncationString, alignment, font) end
+function playdate.graphics.sprite.spriteWithText(text, maxWidth, maxHeight, backgroundColor, leadingAdjustment,
+                                                 truncationString, alignment, font)
+end
 
 --- This class method (note the "." syntax rather than ":") calls the update() function on every
 --- sprite in the global sprite list and redraws all of the dirty rects.
@@ -5952,13 +5956,13 @@ function playdate.graphics.sprite:moveBy(x, y) end
 --- [Inside Playdate: playdate.graphics.sprite:setZIndex](https://sdk.play.date/Inside%20Playdate.html#m-graphics.sprite.setZIndex)
 ---@param z integer
 ---@return nil
-function playdate.graphics.sprite:setZIndex(z) end
+function playdate.graphics.sprite:setZ_INDEXES(z) end
 
 --- Returns the Z-index of the given sprite.
 ---
---- [Inside Playdate: playdate.graphics.sprite:getZIndex](https://sdk.play.date/Inside%20Playdate.html#m-graphics.sprite.getZIndex)
+--- [Inside Playdate: playdate.graphics.sprite:getZ_INDEXES](https://sdk.play.date/Inside%20Playdate.html#m-graphics.sprite.getZ_INDEXES)
 ---@return integer
-function playdate.graphics.sprite:getZIndex() end
+function playdate.graphics.sprite:getZ_INDEXES() end
 
 --- Sprites that aren’t visible don’t get their draw() method called.
 ---
@@ -7703,7 +7707,9 @@ function playdate.graphics.drawLocalizedTextAligned(text, x, y, alignment, langu
 ---@param font? playdate.graphics.font
 ---@param language? (integer|string)
 ---@return nil
-function playdate.graphics.drawLocalizedTextInRect(text, x, y, width, height, leadingAdjustment, truncationString, alignment, font, language) end
+function playdate.graphics.drawLocalizedTextInRect(text, x, y, width, height, leadingAdjustment, truncationString,
+                                                   alignment, font, language)
+end
 
 --- You must import *CoreLibs/graphics* to use these functions.
 ---
@@ -7718,7 +7724,9 @@ function playdate.graphics.drawLocalizedTextInRect(text, x, y, width, height, le
 ---@param font? _Font
 ---@param language? (integer|string)
 ---@return nil
-function playdate.graphics.drawLocalizedTextInRect(text, rect, leadingAdjustment, truncationString, alignment, font, language) end
+function playdate.graphics.drawLocalizedTextInRect(text, rect, leadingAdjustment, truncationString, alignment, font,
+                                                   language)
+end
 
 --- You must import *CoreLibs/graphics* to use this function.
 ---
@@ -7772,7 +7780,9 @@ function playdate.graphics.getTextSizeForMaxWidth(text, maxWidth, leadingAdjustm
 ---@param font? playdate.graphics.font
 ---@return _Image image
 ---@return boolean textWasTruncated
-function playdate.graphics.imageWithText(text, maxWidth, maxHeight, backgroundColor, leadingAdjustment, truncationString, alignment, font) end
+function playdate.graphics.imageWithText(text, maxWidth, maxHeight, backgroundColor, leadingAdjustment, truncationString,
+                                         alignment, font)
+end
 
 --- Returns a playdate.graphics.video object from the pdv file at *path*. If the file at *path*
 --- can’t be opened, the function returns nil.
@@ -8194,7 +8204,9 @@ function playdate.pathfinder.graph:findPath(startNode, goalNode, heuristicFuncti
 ---@param heuristicFunction? fun(startNode: _PathFinderNode, goalNode: _PathFinderNode): integer
 ---@param findPathToGoalAdjacentNodes? boolean
 ---@return integer[]
-function playdate.pathfinder.graph:findPathWithIDs(startNodeID, goalNodeID, heuristicFunction, findPathToGoalAdjacentNodes) end
+function playdate.pathfinder.graph:findPathWithIDs(startNodeID, goalNodeID, heuristicFunction,
+                                                   findPathToGoalAdjacentNodes)
+end
 
 --- Sets the matching node’s `x` and `y` values.
 ---
